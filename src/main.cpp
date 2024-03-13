@@ -11,6 +11,8 @@
 #include <WiFi.h>
 #include <ESPAsyncWebServer.h>
 #include <ArduinoJson.h>
+#include "AsyncJson.h"
+#include <array>
 
 
 // ----------------------------------------------------------------------------
@@ -20,6 +22,10 @@
 #define LED_PIN   26
 #define BTN_PIN   22
 #define HTTP_PORT 80
+#define DEVICE_TYPE "1d"
+#define NUMBER_OF_AXES 1
+#define AXIS_LIMIT 80
+
 
 // ----------------------------------------------------------------------------
 // Definition of global constants
@@ -31,6 +37,11 @@ const uint8_t DEBOUNCE_DELAY = 10; // in milliseconds
 // WiFi credentials
 const char *WIFI_SSID = "Orange_Swiatlowod_D850";
 const char *WIFI_PASS = "Gamblersdice";
+
+int currentPositionSteps = 0;
+float currentPosition = 0.0;
+float stepsToMilimeters = 0.01;
+bool isHomed = false;
 
 // ----------------------------------------------------------------------------
 // Definition of the LED component
@@ -217,6 +228,84 @@ void initWebSocket() {
     server.addHandler(&ws);
 }
 
+
+void getDeviceType(AsyncWebServerRequest *request){
+    JsonDocument json;
+    json["type"] = "1d";
+    char data[17];
+    serializeJson(json, data);
+    request->send(200, "application/json", data);
+}
+
+void getNumberOfAxes(AsyncWebServerRequest *request){
+    JsonDocument json;
+    json["numberOfAxes"] = NUMBER_OF_AXES;
+    char data[21];
+    serializeJson(json, data);
+    request->send(200, "application/json", data);
+}
+
+void getPosition(AsyncWebServerRequest *request){
+    JsonDocument json;
+
+    JsonArray axes = json["axes"].to<JsonArray>();
+    axes.add(NUMBER_OF_AXES);
+
+    JsonArray units = json["units"].to<JsonArray>();
+    units.add("mm");
+
+    JsonArray position = json["position"].to<JsonArray>();
+    position.add(currentPosition);
+
+    char data[128];
+    serializeJson(json, data);
+    request->send(200, "application/json", data);
+}
+
+void homeAxis(AsyncWebServerRequest *request){
+    isHomed = true; //TODO actually home device
+    request->send(200);
+}
+
+void axisHomeCheck(AsyncWebServerRequest *request){
+    JsonDocument json;
+
+    JsonArray axes = json["axesChecked"].to<JsonArray>();
+    axes.add(NUMBER_OF_AXES);
+
+    JsonArray status = json["homeStatus"].to<JsonArray>();
+    status.add(isHomed);
+
+    char data[128];
+    serializeJson(json, data);
+    request->send(200, "application/json", data);
+}
+
+void setPosition(AsyncWebServerRequest *request, JsonObject jsonObj){
+    if (jsonObj.containsKey("position")) {
+        float position = jsonObj["position"][0] ;
+        currentPosition = position ;
+    }
+    request->send(200);
+}
+
+void getAxesLimits(AsyncWebServerRequest *request){
+    JsonDocument json;
+
+    JsonArray axes = json["axes"].to<JsonArray>();
+    axes.add(NUMBER_OF_AXES);
+
+    JsonArray limit = json["limits"].to<JsonArray>();
+    limit.add(AXIS_LIMIT);
+
+    JsonArray units = json["units"].to<JsonArray>();
+    limit.add("mm");
+
+    char data[128];
+    serializeJson(json, data);
+    request->send(200, "application/json", data);
+}
+
 // ----------------------------------------------------------------------------
 // Initialization
 // ----------------------------------------------------------------------------
@@ -232,18 +321,19 @@ void setup() {
     initWiFi();
     initWebSocket();
     initWebServer();
-    server.on("/getDeviceType", HTTP_GET, [] (AsyncWebServerRequest *request){
-        const char * r = request->getHeader(size_t(1))->toString().c_str() ;
-        Serial.printf("request get device type");
-        Serial.printf( r );
-        const uint8_t size = JSON_OBJECT_SIZE(1);
-        StaticJsonDocument<size> json;
-        json["type"] = "1d";
-        char data[17];
-        serializeJson(json, data);
-        request->send(200, "application/json", data);
-        
-    });
+    server.on("/getDeviceType", HTTP_GET, [](AsyncWebServerRequest *request){ getDeviceType(request); });
+    server.on("/getNumberOfAxes", HTTP_GET, [](AsyncWebServerRequest *request){ getNumberOfAxes(request); });
+    server.on("/getPosition", HTTP_GET, [](AsyncWebServerRequest *request){ getPosition(request); });
+    server.on("/homeAxis", HTTP_POST, [](AsyncWebServerRequest *request){ homeAxis(request); });
+    server.on("/axisHomeCheck", HTTP_GET, [](AsyncWebServerRequest *request){ axisHomeCheck(request); });
+    server.on("/getAxesLimits", HTTP_GET, [](AsyncWebServerRequest *request){ getAxesLimits(request); });
+
+    AsyncCallbackJsonWebHandler* handler = new AsyncCallbackJsonWebHandler("/setPosition", [](AsyncWebServerRequest *request, JsonVariant &json) {
+        JsonObject jsonObj = json.as<JsonObject>();
+        setPosition(request, jsonObj);
+        //JsonDocument json;
+    }); 
+    server.addHandler(handler); 
 }
 
 
