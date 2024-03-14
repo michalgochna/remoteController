@@ -13,6 +13,7 @@
 #include <ArduinoJson.h>
 #include "AsyncJson.h"
 #include <array>
+#include "device/device.h"
 
 
 // ----------------------------------------------------------------------------
@@ -38,10 +39,6 @@ const uint8_t DEBOUNCE_DELAY = 10; // in milliseconds
 const char *WIFI_SSID = "Orange_Swiatlowod_D850";
 const char *WIFI_PASS = "Gamblersdice";
 
-int currentPositionSteps = 0;
-float currentPosition = 0.0;
-float stepsToMilimeters = 0.01;
-bool isHomed = false;
 
 // ----------------------------------------------------------------------------
 // Definition of the LED component
@@ -115,6 +112,8 @@ Button button      = { BTN_PIN, HIGH, 0, 0 };
 
 AsyncWebServer server(HTTP_PORT);
 AsyncWebSocket ws("/ws");
+Device device;
+
 
 // ----------------------------------------------------------------------------
 // SPIFFS initialization
@@ -169,8 +168,7 @@ void initWebServer() {
 // ----------------------------------------------------------------------------
 
 void notifyClients() {
-    const uint8_t size = JSON_OBJECT_SIZE(1);
-    StaticJsonDocument<size> json;
+    JsonDocument json;
     json["status"] = led.on ? "on" : "off";
 
     char data[17];
@@ -181,9 +179,7 @@ void notifyClients() {
 void handleWebSocketMessage(void *arg, uint8_t *data, size_t len) {
     AwsFrameInfo *info = (AwsFrameInfo*)arg;
     if (info->final && info->index == 0 && info->len == len && info->opcode == WS_TEXT) {
-
-        const uint8_t size = JSON_OBJECT_SIZE(1);
-        StaticJsonDocument<size> json;
+        JsonDocument json;
         DeserializationError err = deserializeJson(json, data);
         if (err) {
             Serial.print(F("deserializeJson() failed with code "));
@@ -196,7 +192,6 @@ void handleWebSocketMessage(void *arg, uint8_t *data, size_t len) {
             led.on = !led.on;
             notifyClients();
         }
-        
     }
 }
 
@@ -255,7 +250,7 @@ void getPosition(AsyncWebServerRequest *request){
     units.add("mm");
 
     JsonArray position = json["position"].to<JsonArray>();
-    position.add(currentPosition);
+    position.add(device.getPosition());
 
     char data[128];
     serializeJson(json, data);
@@ -263,7 +258,7 @@ void getPosition(AsyncWebServerRequest *request){
 }
 
 void homeAxis(AsyncWebServerRequest *request){
-    isHomed = true; //TODO actually home device
+    device.homeAxis(); //TODO actually home device
     request->send(200);
 }
 
@@ -274,7 +269,7 @@ void axisHomeCheck(AsyncWebServerRequest *request){
     axes.add(NUMBER_OF_AXES);
 
     JsonArray status = json["homeStatus"].to<JsonArray>();
-    status.add(isHomed);
+    status.add(device.isHomed());
 
     char data[128];
     serializeJson(json, data);
@@ -284,7 +279,7 @@ void axisHomeCheck(AsyncWebServerRequest *request){
 void setPosition(AsyncWebServerRequest *request, JsonObject jsonObj){
     if (jsonObj.containsKey("position")) {
         float position = jsonObj["position"][0] ;
-        currentPosition = position ;
+        device.setPosition(position);
     }
     request->send(200);
 }
@@ -296,10 +291,10 @@ void getAxesLimits(AsyncWebServerRequest *request){
     axes.add(NUMBER_OF_AXES);
 
     JsonArray limit = json["limits"].to<JsonArray>();
-    limit.add(AXIS_LIMIT);
+    limit.add(device.getLimit());
 
     JsonArray units = json["units"].to<JsonArray>();
-    limit.add("mm");
+    units.add("mm");
 
     char data[128];
     serializeJson(json, data);
@@ -343,15 +338,5 @@ void setup() {
 
 void loop() {
     ws.cleanupClients();
-    button.read();
-
-    if (button.pressed()) {
-      led.on = !led.on;
-      notifyClients();
-    }
     
-    onboard_led.on = millis() % 1000 < 50;
-
-    led.update();
-    onboard_led.update();
 }
